@@ -1,0 +1,718 @@
+/**
+ * Copyright 2017 the University of Central Florida Research Foundation, Inc.
+ * All rights reserved.
+ *
+ * Eugene M. Taranta II <etaranta@gmail.com>
+ * Amirreza Samiei <samiei@knights.ucf.edu>
+ * Mehran Maghoumi <mehran@cs.ucf.edu>
+ * Pooya Khaloo <pooya@cs.ucf.edu>
+ * Corey R. Pittman <cpittman@knights.ucf.edu>
+ * Joseph J. LaViola Jr. <jjl@cs.ucf.edu>
+ *
+ * Subject to the terms and conditions of this academic license, the Licensor
+ * hereby grants, royalty-free, non-sublicensable, non-commercial,
+ * non-exclusive, academic research license to any person obtaining a copy of
+ * this software and associated documentation files (the "Software"), to deal in
+ * the Software without restriction, including without limitation the rights to
+ * use, copy, modify, merge, publish, but not to distribute, and to permit
+ * persons to whom the Software is furnished to do so, subject to the following
+ * conditions:
+ *
+ *    * The above copyright notice and this permission notice shall be included
+ *      in all copies or substantial portions of the Software. Publications
+ *      resulting from use of the software shall cite the authors of the
+ *      publication titled, “Jackknife: A Reliable Recognizer with Few Samples
+ *      and Many Modalities.”
+ *
+ *    * Identification of the authors and copyright holder of the software shall
+ *      receive attribution, in any reasonable manner.
+ *
+ *    * Patent and trademark rights of the copyright holder are not licensed
+ *      under this academic license.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" BY THE COPYRIGHT HOLDER, WITHOUT WARRANTY OF
+ * ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+ * NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDER BE LIABLE FOR ANY DIRECT,
+ * INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT
+ * LIMITED TO LOSS OF USE, DATA OR BUSINESS INTERRUPTION), CLAIM, OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+#include <stdio.h>
+#include <fstream>
+#include <limits>
+#include <cmath>
+#include "evaluate.h"
+#include "filters.h"
+
+/**
+ * Size of each frame stored in a session file in bytes.
+ */
+const int g_frame_size_b = (5+63) * 4;
+
+/**
+ *
+ */
+struct configuartion_parameters_t
+{
+    /**
+     * The input device sampling rate.
+     */
+    int fps;
+
+    /**
+     * The maximum amount of data (in seconds) that is collected
+     * and passed to the recognizer. Since the buffer is cleared
+     * when a gesture is recognized, the buffer may be shorter.
+     */
+    double sliding_window_s;
+
+    /**
+     * Sliding window converted into frames based on FPS.
+     */
+    int sliding_window_frame_cnt;
+
+    /**
+     * The recognizer is called once per this many frames.
+     */
+    int update_interval;
+
+    /**
+     * A gesture has to have the best Jackknife score this many
+     * times before being officially recognized by this application.
+     */
+    int repeat_cnt;
+
+    /**
+     *
+     */
+    configuartion_parameters_t(device_type_t device)
+    {
+        if(device == KINECT)
+        {
+            fps = 30;
+            sliding_window_s = 2.0;
+            update_interval = 5;
+            repeat_cnt = 3;
+        }
+        else if (device == LEAP_MOTION)
+        {
+            fps = 30;
+            sliding_window_s = 4.0;
+            update_interval = 10;
+            repeat_cnt = 4;
+        }
+        else
+        {
+            assert(0);
+        }
+
+        sliding_window_frame_cnt = (int)((double)fps * sliding_window_s);
+    }
+};
+
+/**
+ * The gesture ID in the dataset does not match the gesture
+ * IDs used in the session files. So this helper function
+ * does a conversion.
+ */
+int convert_gesture_id(
+    Dataset::Ptr ds,
+    int gesture_id)
+{
+    const char *gname[] = {
+        "jab_right",
+        "jab_left",
+        "kick_right",
+        "kick_left",
+        "hook_right",
+        "hook_left",
+        "uppercut_right",
+        "uppercut_left",
+        "cartwheel_right",
+        "cartwheel_left",
+        "push",
+        "sidekick_right",
+        "sidekick_left",
+        "duck",
+        "explode",
+        "fist_2_circles",
+        "index_2_circles",
+        "knock_x3",
+        "scissors",
+        "sideways",
+        "rock_out",
+        "love",
+        "redrum",
+    };
+
+    assert(gesture_id >= 1);
+    assert(gesture_id <= 23);
+
+    int ret = ds->gesture_name_to_id(gname[gesture_id - 1]);
+    return ret;
+}
+
+/**
+ *
+ */
+bool bad_gesture(int gesture_id)
+{
+    // redrum
+    if(gesture_id == 23)
+        return true;
+
+    return false;
+}
+
+/**
+ *
+ */
+bool bad_gesture(std::shared_ptr<std::string> gesture_name)
+{
+    if(std::strcmp(gesture_name->c_str(), "redrum") == 0)
+        return true;
+
+    return false;
+}
+
+/**
+ *
+ */
+const int* get_participant_list(device_type_t device)
+{
+    if(device == KINECT)
+    {
+        const static int ret[] = {
+            100, 101, 102, 103,
+            104, 105, 106, 107,
+            108, 109, 110, 111,
+            200, 201, 202, 203,
+            204, 205, 206, 207,
+            000,
+        };
+
+        return ret;
+    }
+    else if(device == LEAP_MOTION)
+    {
+        const static int ret[] = {
+            300, 301, 302, 303,
+            304, 305, 306, 307,
+            400, 401, 402, 403,
+            404, 500, 501, 502,
+            503, 504, 505, 506,
+            000,
+        };
+
+        return ret;
+    }
+
+    assert(0);
+    return NULL;
+}
+
+/**
+ *
+ */
+struct Frame
+{
+    /**
+     * The expected gesture: the gesture that the
+     * participant should execute.
+     */
+    int gesture_id;
+
+    /**
+     * Enumerated command id.
+     */
+    int cmd_id;
+
+    /**
+     * Currently not used (originates from another project
+     * but takes up space in output file).
+     */
+    float time_remaining_s;
+
+    /**
+     * Position of command on screen.
+     */
+    float text_pos_x;
+
+    /**
+     * Position of command on screen.
+     */
+    float text_pos_y;
+
+    /**
+     * True if any component in vector is NAN or infinity.
+     * This can happen if the input device loses tracking.
+     */
+    bool bad_pt;
+
+    /**
+     * The actual input! :)
+     */
+    Jackknife::Vector pt;
+
+    /**
+     *
+     */
+    Frame() {}
+
+    /**
+     * Read in the next frame from the binary input session file.
+     */
+    Frame(std::ifstream &fin)
+    {
+        union {
+            char cdata[4];
+            int idata;
+            float fdata;
+        } e;
+
+        assert(sizeof(int) == 4);
+        assert(sizeof(float) == 4);
+        assert(sizeof(char) == 1);
+
+        fin.read(e.cdata, sizeof(e.cdata));
+        gesture_id = e.idata;
+
+        fin.read(e.cdata, sizeof(e.cdata));
+        cmd_id = e.idata;
+
+        fin.read(e.cdata, sizeof(e.cdata));
+        time_remaining_s = e.fdata;
+
+        fin.read(e.cdata, sizeof(e.cdata));
+        text_pos_x = e.fdata;
+
+        fin.read(e.cdata, sizeof(e.cdata));
+        text_pos_y = e.fdata;
+
+        bad_pt = 0;
+        pt = Jackknife::Vector(63);
+        for (int ii = 0;
+             ii < 63;
+             ii++)
+        {
+            float component;
+            fin.read(e.cdata, sizeof(e.cdata));
+            pt[ii] = (double)e.fdata;
+
+            if(!std::isfinite(pt[ii]))
+            {
+                bad_pt = true;
+            }
+        }
+    }
+};
+
+/**
+ *
+ */
+struct CommandResults
+{
+    /**
+     * The enumerated command ID.
+     */
+    int command_id;
+
+    /**
+     * Gesture that is expected.
+     */
+    int expected_id;
+
+    /**
+     * List of gestures that are detected during this
+     * command window.
+     */
+    std::vector<int> detected_ids;
+
+    /**
+     * If the participant made a mistake or tracking was lost,
+     * we repeat the gesture request in the next command window.
+     * So this command should be ignored.
+     */
+    bool ignore;
+
+    /**
+     *
+     */
+    CommandResults(
+        int command_id,
+        int expected_id)
+    {
+        this->command_id = command_id;
+        this->expected_id = expected_id;
+        this->ignore = false;
+    }
+
+    /**
+     * Collect any gestures detection during this
+     * command duration.
+     */
+    void add(int detected_id)
+    {
+        assert(detected_id >= 0);
+        detected_ids.push_back(detected_id);
+    }
+
+    /**
+     * After the command is complete, update the matrices
+     * with detected gestures.
+     */
+    void update_confusion_matrices(ConfusionMatrices  &cm)
+    {
+        int found = false;
+
+        for (int ii = 0;
+             ii < detected_ids.size();
+             ii++)
+        {
+            int detected_id = detected_ids[ii];
+
+            if(found && expected_id == detected_id)
+            {
+                // treat as false positive
+                // because we've already detected
+                // the gesture once
+                cm.add_result(
+                    expected_id,
+                    -2);
+                continue;
+            }
+
+            cm.add_result(
+                expected_id,
+                detected_id);
+
+            // mark that we've found this gesture
+            found = found || (detected_id == expected_id);
+        }
+
+        // false negative
+        if(!found)
+        {
+            cm.add_result(
+                expected_id,
+                -1);
+        }
+    }
+};
+
+/**
+ * Local overload of version in dataset.cpp.
+ */
+static Dataset::Ptr load_subject_dataset(
+    device_type_t device,
+    int subject_id)
+{
+    // build the subject's dataset path
+    char subject_path[1024];
+    int ret = sprintf(
+        subject_path,
+        "${Jackknife_Root}datasets/jk2017/%s/training/Sub_U%3d",
+        device == KINECT ? "kinect" : "leap_motion",
+        subject_id);
+    assert(ret != -1);
+
+    // load the subject's dataset
+    Dataset::Ptr ds(new Dataset());
+    load_subject_dataset(
+        ds,
+        subject_path);
+    return ds;
+}
+
+/**
+ * Read in all frames from a binary session file.
+ */
+void load_session(
+    device_type_t device,
+    int subject_id,
+    std::vector<struct Frame> &frames)
+{
+    // Build the subject's session path.
+    char session_path[1024];
+    int ret = sprintf(
+        session_path,
+        "${Jackknife_Root}datasets/jk2017/%s/sessions/U%3d",
+        device == KINECT ? "kinect" : "leap_motion",
+        subject_id);
+    assert(ret != -1);
+
+    // Open file at end.
+    std::ifstream fin(
+        session_path,
+        std::ifstream::ate | std::fstream::binary);
+
+    // Read position.
+    std::streampos position_end = fin.tellg();
+
+    // Seek to start.
+    fin.seekg(
+        0,
+        std::ios::beg);
+
+    // Read position and extract file size.
+    // Size should be end position, but
+    // just in case, do this extract work.
+    std::streampos position_start = fin.tellg();
+    std::streampos size = position_end - position_start;
+
+    // convert to frame_cnt
+    int frame_cnt = size / g_frame_size_b;
+    assert(frame_cnt * g_frame_size_b == size);
+
+    for (int ii = 0;
+        ii < frame_cnt;
+        ii++)
+    {
+        Frame frame(fin);
+
+        // There is an issue where the main program ran at 60fps,
+        // but the Kinect only samples at 30fps. Some a number of
+        // readings are duplicates and need to be removed.
+        if(ii > 0)
+        {
+            int idx = frames.size() - 1;
+            double distance = frame.pt.l2norm(frames[idx].pt);
+            if(distance == 0.0)
+                continue;
+        }
+
+        frames.push_back(frame);
+    }
+
+    fin.close();
+}
+
+/**
+ * Load a participant's dataset and session.
+ * Train the recognizer with the training data
+ * and run the video through. See what happens...
+ */
+ConfusionMatrices evaluate_session(
+    device_type_t device,
+    int subject_id)
+{
+    // Load up the training dataset.
+    Dataset::Ptr ds = load_subject_dataset(
+        device,
+        subject_id);
+
+    // Load up the session.
+    std::vector<struct Frame> frames;
+    load_session(
+        device,
+        subject_id,
+        frames);
+
+    // Create a new recognizer.
+    Jackknife::jackknife_blades_t blades;
+    blades.set_ip_defaults();
+    Jackknife::Jackknife jk(blades);
+
+    // Train the recognizer, without 'bad' gestures.
+    for (int ii = 0;
+         ii < ds->samples.size();
+         ii++)
+    {
+        int gesture_id = ds->samples[ii]->gesture_id;
+        std::shared_ptr<std::string> gesture_name = ds->gestures[gesture_id];
+        if (bad_gesture(gesture_name))
+            continue;
+        jk.add_template(ds->samples[ii]);
+    }
+
+    // Get device and application parameters
+    // based on the device type.
+    struct configuartion_parameters_t params(device);
+
+    // We originally used n=4, r=2 for Kinect data
+    // and n=6, r=2 for Leap Motion data, but
+    // here we just set the average. There is barely
+    // any effect on the results.
+    jk.train(6, 2, 1.00);
+
+    // Play session video through
+    // the recognizer.
+    std::vector<Jackknife::Vector> buffer;
+    std::vector<int> detections;
+    std::vector<struct CommandResults> cmds;
+    int last_cmd_id = -1;
+    int next_update = params.update_interval;
+
+    int frame_no = 0;
+
+    Jackknife::ExponentialMovingAverage filter(frames[0].pt);
+    Jackknife::Vector pt;
+
+    for (int ii = 0;
+         ii < frames.size();
+         ii++)
+    {
+        // skip this frame if its bad
+        if(frames[ii].bad_pt)
+        {
+            continue;
+        }
+
+        // Low pass filter the input.
+        // Note, we originally didn't smooth the data,
+        // so results now are a little higher than in
+        // the paper.
+        pt = filter(
+            frames[ii].pt,
+            1/(double)params.fps);
+
+        //pt = frames[ii].pt;
+
+        frame_no += 1;
+
+        // start a new command
+        if(frames[ii].cmd_id != last_cmd_id)
+        {
+            last_cmd_id = frames[ii].cmd_id;
+
+            int gid = convert_gesture_id(
+                ds,
+                frames[ii].gesture_id);
+
+            CommandResults cmd(
+                frames[ii].cmd_id,
+                gid);
+
+            if(bad_gesture(frames[ii].gesture_id))
+                cmd.ignore = true;
+
+            cmds.push_back(cmd);
+        }
+
+        // This buffering approach is really
+        // inefficient, but since this off-line,
+        // performance is not important.
+        buffer.push_back(pt);
+        if(buffer.size() > params.sliding_window_frame_cnt)
+            buffer.erase(buffer.begin());
+
+        // We need to have a couple points before
+        // calling the recognizer.
+        if(buffer.size() < 2)
+            continue;
+
+        // Wait a few frames again before trying
+        // to recognize again.
+        if(frame_no < next_update)
+            continue;
+
+        next_update = frame_no + params.update_interval;
+
+        // Run the recognizer.
+        int gesture_id = jk.classify(buffer);
+
+        // Add recognition result.
+        detections.push_back(gesture_id);
+        if(detections.size() > params.repeat_cnt)
+            detections.erase(detections.begin());
+
+        // Count how many times this gesture was recognized.
+        int winner_cnt = 0;
+        for (int jj = 0;
+             jj < detections.size();
+             jj++)
+        {
+            winner_cnt += (detections[jj] == gesture_id);
+        }
+
+        // Ensure we have enough recognitions.
+        if(winner_cnt < params.repeat_cnt)
+            continue;
+
+        // If nothing was detected, skip rest.
+        if(gesture_id == -1)
+            continue;
+
+        // Hurray! A gesture is recognized!
+        // Hopefully it's the right one too!!
+        cmds[cmds.size() - 1].add(gesture_id);
+        detections.clear();
+        buffer.clear();
+    }
+
+    // Mark bad commands, situations where the participant
+    // made a mistake or tracking was lost. We know the
+    // command was bad because the protector asked the
+    // participant to repeat the gesture, but a new command
+    // ID is assigned to the sequence.
+    for (int ii = 1;
+         ii < cmds.size();
+         ii++)
+    {
+        if(cmds[ii].expected_id == cmds[ii-1].expected_id)
+            cmds[ii-1].ignore = true;
+    }
+
+    // Put all results in confusion matrices.
+    ConfusionMatrices ret(ds);
+
+    for (int ii = 0;
+         ii < cmds.size();
+         ii ++)
+    {
+        if(cmds[ii].ignore)
+            continue;
+
+        cmds[ii].update_confusion_matrices(ret);
+    }
+
+    return ret;
+}
+
+/**
+ * Evaluate all user study sessions for a given device type.
+ */
+void evaluate_sessions(device_type_t device)
+{
+    std::vector<ConfusionMatrices> confusion_matrices;
+    const int *participants = get_participant_list(device);
+
+    while(*participants != 0x00)
+    {
+        ConfusionMatrices cm = evaluate_session(
+            device,
+            *participants);
+        confusion_matrices.push_back(cm);
+
+        int idx = confusion_matrices.size() - 1;
+
+        std::cout << "Participant: "
+                  << *participants
+                  << std::endl;
+
+        results_t results = confusion_matrices[idx].results();
+        results.print();
+        std::cout << std::endl;
+
+        participants ++;
+    }
+
+    // put all results into first confusion
+    // matrix
+    for (int ii = 1;
+         ii < confusion_matrices.size();
+         ii++)
+    {
+        confusion_matrices[0].add_result(confusion_matrices[ii]);
+    }
+
+    std::cout << "Aggregate results:" << std::endl;
+
+    results_t results = confusion_matrices[0].results();
+    results.print();
+    std::cout << std::endl;
+}

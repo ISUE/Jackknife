@@ -1,0 +1,1 @@
+This dirent header is taken from https://github.com/tronkko/dirent and used under the MIT license.
