@@ -1,44 +1,22 @@
 /**
  * Copyright 2017 the University of Central Florida Research Foundation, Inc.
  * All rights reserved.
+ * 
+ *     Eugene M. Taranta II <etaranta@gmail.com>
+ *     Amirreza Samiei <samiei@knights.ucf.edu>
+ *     Mehran Maghoumi <mehran@cs.ucf.edu>
+ *     Pooya Khaloo <pooya@cs.ucf.edu>
+ *     Corey R. Pittman <cpittman@knights.ucf.edu>
+ *     Joseph J. LaViola Jr. <jjl@cs.ucf.edu>
+ * 
+ * Subject to the terms and conditions of the Florida Public Educational
+ * Institution non-exclusive software license, this software is distributed 
+ * under a non-exclusive, royalty-free, non-sublicensable, non-commercial, 
+ * non-exclusive, academic research license, and is distributed without warranty
+ * of any kind express or implied. 
  *
- * Eugene M. Taranta II <etaranta@gmail.com>
- * Amirreza Samiei <samiei@knights.ucf.edu>
- * Mehran Maghoumi <mehran@cs.ucf.edu>
- * Pooya Khaloo <pooya@cs.ucf.edu>
- * Corey R. Pittman <cpittman@knights.ucf.edu>
- * Joseph J. LaViola Jr. <jjl@cs.ucf.edu>
- *
- * Subject to the terms and conditions of this academic license, the Licensor
- * hereby grants, royalty-free, non-sublicensable, non-commercial,
- * non-exclusive, academic research license to any person obtaining a copy of
- * this software and associated documentation files (the "Software"), to deal in
- * the Software without restriction, including without limitation the rights to
- * use, copy, modify, merge, publish, but not to distribute, and to permit
- * persons to whom the Software is furnished to do so, subject to the following
- * conditions:
- *
- *    * The above copyright notice and this permission notice shall be included
- *      in all copies or substantial portions of the Software. Publications
- *      resulting from use of the software shall cite the authors of the
- *      publication titled, “Jackknife: A Reliable Recognizer with Few Samples
- *      and Many Modalities.”
- *
- *    * Identification of the authors and copyright holder of the software shall
- *      receive attribution, in any reasonable manner.
- *
- *    * Patent and trademark rights of the copyright holder are not licensed
- *      under this academic license.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" BY THE COPYRIGHT HOLDER, WITHOUT WARRANTY OF
- * ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
- * NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDER BE LIABLE FOR ANY DIRECT,
- * INDIRECT, INCIDENTAL, SPECIAL, OR CONSEQUENTIAL DAMAGES (INCLUDING BUT NOT
- * LIMITED TO LOSS OF USE, DATA OR BUSINESS INTERRUPTION), CLAIM, OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * The Florida Public Educational Institution non-exclusive software license
+ * is located at <https://github.com/ISUE/Jackknife/blob/master/LICENSE>.
  */
 
 #include <stdio.h>
