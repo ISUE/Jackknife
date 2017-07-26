@@ -37,6 +37,15 @@ For Visual Studio 2015 and above, it's easier to use CMake GUI tool to generate 
 
 The solution file for C# implementation is available under `csharp` directory. The code does not have any dependencies and should build out of the box with Visual Studio 2015 and above. After cloning the repository, simply open `Jackknife.sln` and build. Running the built executable will run the default examples on our dataset.
 
+#### A Note About Locale Settings
+Some of our data files are stored in text format and contain decimal values stored as strings. We have noticed that depending on the operating system's regional settings, some data files could get parsed incorrectly by .NET framework. This is due to the fact that decimal separators vary by region (for instance, the German format uses "," as the decimal separator, so 50.7 is shown as 50,7 in the German format).  
+
+As a result, at the beginning of `Program.cs` of our bundled example, we have included the following line:  
+
+    System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("en-US", false);
+
+This effectively forces the current thread to use "en-US" locale when parsing string data.
+
 ### JavaScript Code
 
 The JavaScript implementation is available under `js` directory. The JS implementation depends on node.js if running the default examples from our dataset. After cloning the repository, run merged.js (the concatenation of all the files from the subdirectories and main.js) from the node command line to test our example datasets. If only the recognizer is needed, there is no node.js dependency and only the js/jackknife subdirectory needs to be included.

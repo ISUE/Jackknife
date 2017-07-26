@@ -31,6 +31,17 @@ namespace Jackknife
     {
         static void Main(string[] args)
         {
+            /**
+             * IMPORTANT:
+             * It is important that the files containing training data are parsed with "en-US" locale setting.
+             * Other regional formats (e.g. German) may use different decimal separators, which would cause problems
+             * when parsing our data files.
+             * 
+             * The line below forces .NET to use "en-US" locale when converting decimal strings to double
+             * values
+             */
+            System.Threading.Thread.CurrentThread.CurrentCulture = new System.Globalization.CultureInfo("en-US", false);
+
             Console.WriteLine("---------[ KINECT UI TEST ] ---------");
 
             UserIndependent.user_indepedent_test(DeviceType.KINECT);
