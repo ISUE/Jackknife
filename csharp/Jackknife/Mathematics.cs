@@ -63,7 +63,7 @@ namespace Jackknife
 
             // last, z-score normalize all points
             for (int i = 0; i < n; i++)
-                points[i] = (points[1] - mean) / var;
+                points[i] = (points[i] - mean) / var;
         }
 
         /**
